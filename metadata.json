@@ -1,0 +1,5 @@
+{
+  "name": "Zinder Connect",
+  "description": "Une plateforme innovante pour la ville de Zinder : cartographie locale, services essentiels et opportunités pour les entrepreneurs.",
+  "requestFramePermissions": ["geolocation"]
+}
