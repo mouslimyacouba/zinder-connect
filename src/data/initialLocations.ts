@@ -1,13 +1,4 @@
-import express from "express";
-import { createServer as createViteServer } from "vite";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-interface LocationItem {
+export interface LocationItem {
   id: number;
   name: string;
   type: string;
@@ -23,7 +14,7 @@ interface LocationItem {
   created_at?: string;
 }
 
-const DEFAULT_PLACES: LocationItem[] = [
+export const INITIAL_ZINDER_LOCATIONS: LocationItem[] = [
   // Culture & Patrimoine
   {
     id: 1,
@@ -81,6 +72,7 @@ const DEFAULT_PLACES: LocationItem[] = [
     opening_hours: "08h30 - 19h00",
     rating: 4.6
   },
+  
   // Commerce & Marchés
   {
     id: 5,
@@ -124,7 +116,8 @@ const DEFAULT_PLACES: LocationItem[] = [
     opening_hours: "08h00 - 18h30",
     rating: 4.8
   },
-  // Santé & Pharmacies
+  
+  // Santé & Pharmacies (avec statut de garde)
   {
     id: 8,
     name: "Hôpital National de Zinder (HNZ)",
@@ -181,6 +174,7 @@ const DEFAULT_PLACES: LocationItem[] = [
     opening_hours: "07h30 - 21h00",
     rating: 4.5
   },
+  
   // Éducation & Formation
   {
     id: 12,
@@ -210,6 +204,7 @@ const DEFAULT_PLACES: LocationItem[] = [
     opening_hours: "07h30 - 17h00",
     rating: 4.5
   },
+  
   // Transport & Services Publics
   {
     id: 14,
@@ -281,6 +276,7 @@ const DEFAULT_PLACES: LocationItem[] = [
     opening_hours: "Ouvert 24h/24",
     rating: 4.8
   },
+  
   // Restauration & Hôtellerie
   {
     id: 19,
@@ -311,119 +307,3 @@ const DEFAULT_PLACES: LocationItem[] = [
     rating: 4.6
   }
 ];
-
-// Persistent file-backed store
-const DATA_FILE = path.join(process.cwd(), "zinder-data.json");
-
-function loadLocations(): LocationItem[] {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const content = fs.readFileSync(DATA_FILE, "utf-8");
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.error("Error reading data file:", e);
-  }
-  return [...DEFAULT_PLACES];
-}
-
-function saveLocations(data: LocationItem[]): void {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Error saving data file:", e);
-  }
-}
-
-let locationsStore: LocationItem[] = loadLocations();
-
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
-
-  app.use(express.json());
-
-  // Health check endpoint
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
-
-  // API Routes
-  app.get("/api/locations", (req, res) => {
-    res.json(locationsStore);
-  });
-
-  app.post("/api/locations", (req, res) => {
-    const { 
-      name, 
-      type, 
-      latitude, 
-      longitude, 
-      description, 
-      address, 
-      neighborhood, 
-      phone, 
-      is_on_duty, 
-      opening_hours 
-    } = req.body;
-
-    try {
-      const newId = locationsStore.length > 0 ? Math.max(...locationsStore.map(l => l.id)) + 1 : 1;
-      const newPlace: LocationItem = {
-        id: newId,
-        name: String(name || "Nouveau lieu"),
-        type: String(type || "Commerce"),
-        latitude: Number(latitude) || 13.805,
-        longitude: Number(longitude) || 8.985,
-        description: String(description || ""),
-        address: String(address || ""),
-        neighborhood: String(neighborhood || "Centre-ville"),
-        phone: String(phone || ""),
-        is_on_duty: is_on_duty ? 1 : 0,
-        opening_hours: String(opening_hours || "08h00 - 18h00"),
-        rating: 4.5,
-        created_at: new Date().toISOString()
-      };
-
-      locationsStore.unshift(newPlace);
-      saveLocations(locationsStore);
-
-      res.json({ id: newId, success: true, place: newPlace });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: "Erreur lors de l'ajout du lieu" });
-    }
-  });
-
-  // Emergency / On-duty endpoint
-  app.get("/api/emergency", (req, res) => {
-    const emergencyList = locationsStore
-      .filter(l => l.is_on_duty === 1 || l.type === 'Santé' || l.type === 'Service')
-      .sort((a, b) => (b.is_on_duty - a.is_on_duty) || a.name.localeCompare(b.name));
-    res.json(emergencyList);
-  });
-
-  // Vite middleware for development vs static build for production
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-  });
-}
-
-startServer();
