@@ -40,8 +40,21 @@ import { INITIAL_ZINDER_LOCATIONS } from './data/initialLocations';
 import { calculateDistance, formatDistance, interpolatePoints } from './utils/geoUtils';
 import { SimulationController } from './components/SimulationController';
 import { EmergencyModal } from './components/EmergencyModal';
-import { RoadmapModal } from './components/RoadmapModal';
 import { RouteCalculatorCard } from './components/RouteCalculatorCard';
+import { UserAuthModal } from './components/UserAuthModal';
+import { CloudDataInspectorModal } from './components/CloudDataInspectorModal';
+import { 
+  auth, 
+  onAuthStateChanged, 
+  syncUserProfile, 
+  saveSimulationResult, 
+  toggleUserFavorite, 
+  getUserFavorites, 
+  saveCommunityPlace,
+  UserProfile 
+} from './lib/firebase';
+import { User as FirebaseUser } from 'firebase/auth';
+import { Database, User as UserIcon, Heart, Code2, CloudCheck } from 'lucide-react';
 
 // Fix Leaflet marker icons
 // @ts-ignore
@@ -205,8 +218,15 @@ export default function App() {
   // Modals state
   const [isAdding, setIsAdding] = useState(false);
   const [isEmergencyOpen, setIsEmergencyOpen] = useState(false);
-  const [isRoadmapOpen, setIsRoadmapOpen] = useState(false);
   const [isSimulationOpen, setIsSimulationOpen] = useState(true);
+  const [isUserAuthOpen, setIsUserAuthOpen] = useState(false);
+  const [isDataInspectorOpen, setIsDataInspectorOpen] = useState(false);
+
+  // User & Cloud State
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userFavorites, setUserFavorites] = useState<number[]>([]);
+  const [lastSavedSimulationId, setLastSavedSimulationId] = useState<string | null>(null);
 
   // Geolocation state
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
@@ -220,6 +240,27 @@ export default function App() {
   const [transportMode, setTransportMode] = useState<'walk' | 'moto' | 'car'>('moto');
   const [speedMultiplier, setSpeedMultiplier] = useState(2);
   const [proximityAlert, setProximityAlert] = useState<{ location: Location; distance: number } | null>(null);
+
+  // Firebase Auth Observer
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        try {
+          const profile = await syncUserProfile(user);
+          setUserProfile(profile);
+          const favs = await getUserFavorites(user.uid);
+          setUserFavorites(favs);
+        } catch (err) {
+          console.error('Error loading user profile from Firestore:', err);
+        }
+      } else {
+        setUserProfile(null);
+        setUserFavorites([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Add form state
   const [newLocation, setNewLocation] = useState({
@@ -290,6 +331,7 @@ export default function App() {
       setSimStep((prev) => {
         if (prev >= totalSimSteps - 1) {
           setIsSimulating(false);
+          recordCompletedSimulation();
           return totalSimSteps - 1;
         }
         return prev + 1;
@@ -297,7 +339,45 @@ export default function App() {
     }, intervalTime);
 
     return () => clearInterval(interval);
-  }, [isSimulating, totalSimSteps, transportMode, speedMultiplier]);
+  }, [isSimulating, totalSimSteps, transportMode, speedMultiplier, activeCircuit, currentUser, userProfile]);
+
+  // Record simulation run in Cloud Firestore
+  const recordCompletedSimulation = async () => {
+    try {
+      const distance = parseFloat((activeCircuit.points.length * 1.3).toFixed(2));
+      const res = await saveSimulationResult({
+        userId: currentUser?.uid || 'guest',
+        userDisplayName: userProfile?.displayName || currentUser?.displayName || 'Visiteur Zinder',
+        circuitId: activeCircuit.id,
+        circuitTitle: activeCircuit.title,
+        vehicleType: transportMode,
+        speedKmh: transportMode === 'walk' ? 5 : transportMode === 'moto' ? 25 : 45,
+        distanceKm: distance,
+        durationSeconds: Math.round(totalSimSteps * (transportMode === 'walk' ? 1.5 : 0.8)),
+        status: 'completed'
+      });
+      if (res && res.id) {
+        setLastSavedSimulationId(res.id);
+      }
+    } catch (e) {
+      console.error('Failed to save simulation to Cloud DB:', e);
+    }
+  };
+
+  // Toggle favorite place with Firestore persistence
+  const handleToggleFavorite = async (e: React.MouseEvent, loc: Location) => {
+    e.stopPropagation();
+    if (!currentUser) {
+      setIsUserAuthOpen(true);
+      return;
+    }
+    const isFav = userFavorites.includes(loc.id);
+    const updated = isFav 
+      ? userFavorites.filter(id => id !== loc.id) 
+      : [...userFavorites, loc.id];
+    setUserFavorites(updated);
+    await toggleUserFavorite(currentUser.uid, loc.id, loc);
+  };
 
   // Sync map center with simulated movement if enabled
   useEffect(() => {
@@ -387,6 +467,9 @@ export default function App() {
         body: JSON.stringify(newLocation)
       });
       if (res.ok) {
+        // Sync to cloud Firestore
+        saveCommunityPlace(newLocation, currentUser?.uid || 'guest');
+
         setIsAdding(false);
         fetchLocations();
         setNewLocation({
@@ -507,15 +590,35 @@ export default function App() {
             <span className="hidden sm:inline">Simulateur</span>
           </button>
 
-          {/* Roadmap & AI Specifications */}
+          {/* Cloud Inspector / Studio VS Code Web Style */}
           <button
-            id="btn-roadmap-guide"
-            onClick={() => setIsRoadmapOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors"
-            title="Fonctionnalités & Prompts Antigravity"
+            id="btn-cloud-studio"
+            onClick={() => setIsDataInspectorOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-stone-900 text-emerald-400 hover:bg-black border border-stone-800 transition-colors shadow-sm"
+            title="Inspecteur de code, collections Firestore & simulation"
           >
-            <Sparkles size={16} className="text-purple-600" />
-            <span className="hidden xl:inline">Roadmap & IA</span>
+            <Code2 size={16} />
+            <span className="hidden md:inline">Studio Cloud</span>
+          </button>
+
+          {/* User Account / Cloud Sync */}
+          <button
+            id="btn-user-cloud-sync"
+            onClick={() => setIsUserAuthOpen(true)}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+              currentUser
+                ? 'bg-teal-50 text-teal-800 border-teal-300 hover:bg-teal-100'
+                : 'bg-stone-100 text-stone-700 hover:bg-stone-200 border-stone-200'
+            }`}
+            title="Profil utilisateur, favoris et synchronisation Firestore"
+          >
+            <Database size={15} className={currentUser ? "text-teal-600" : "text-stone-500"} />
+            <span className="hidden sm:inline">
+              {currentUser?.displayName ? currentUser.displayName.split(' ')[0] : 'Cloud DB'}
+            </span>
+            {currentUser && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            )}
           </button>
 
           {/* Add location */}
@@ -641,7 +744,18 @@ export default function App() {
                     <span className="truncate">{loc.neighborhood ? `${loc.neighborhood} • ` : ''}{loc.address || 'Zinder'}</span>
                   </div>
                   
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={(e) => handleToggleFavorite(e, loc)}
+                      className={`p-1 rounded-md transition-colors ${
+                        userFavorites.includes(loc.id)
+                          ? 'text-rose-600 bg-rose-50'
+                          : 'text-stone-300 hover:text-rose-500 hover:bg-stone-50'
+                      }`}
+                      title={userFavorites.includes(loc.id) ? "Retirer des favoris" : "Enregistrer dans mes favoris Cloud"}
+                    >
+                      <Heart size={13} className={userFavorites.includes(loc.id) ? "fill-rose-600" : ""} />
+                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1092,12 +1206,12 @@ export default function App() {
           {/* Add Location Modal */}
           <AnimatePresence>
             {isAdding && (
-              <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-stone-900/60 backdrop-blur-md p-4 overflow-y-auto">
+              <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-stone-900/60 backdrop-blur-md p-4 overflow-y-auto">
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden my-auto border border-stone-200"
+                  className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden my-auto border border-stone-200 relative z-[10000]"
                 >
                   <div className="px-6 py-5 border-b border-stone-100 flex items-center justify-between bg-stone-50">
                     <div>
@@ -1216,23 +1330,33 @@ export default function App() {
               </div>
             )}
           </AnimatePresence>
-
-          {/* Emergency Modal */}
-          <EmergencyModal
-            isOpen={isEmergencyOpen}
-            onClose={() => setIsEmergencyOpen(false)}
-            onSelectLocation={(lat, lng) => {
-              setMapCenter([lat, lng]);
-              setMapZoom(16);
-            }}
-          />
-
-          {/* Roadmap & Antigravity Guide Modal */}
-          <RoadmapModal
-            isOpen={isRoadmapOpen}
-            onClose={() => setIsRoadmapOpen(false)}
-          />
         </main>
+
+        {/* Global Modals rendered at root level */}
+        <EmergencyModal
+          isOpen={isEmergencyOpen}
+          onClose={() => setIsEmergencyOpen(false)}
+          onSelectLocation={(lat, lng) => {
+            setMapCenter([lat, lng]);
+            setMapZoom(16);
+          }}
+        />
+
+        {/* User Auth & Profile Modal */}
+        <UserAuthModal
+          isOpen={isUserAuthOpen}
+          onClose={() => setIsUserAuthOpen(false)}
+          currentUser={currentUser}
+          userProfile={userProfile}
+          onRefreshData={fetchLocations}
+        />
+
+        {/* Cloud Database & Studio Inspector Modal */}
+        <CloudDataInspectorModal
+          isOpen={isDataInspectorOpen}
+          onClose={() => setIsDataInspectorOpen(false)}
+          currentUser={currentUser}
+        />
       </div>
     </div>
   );

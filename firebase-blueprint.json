@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Registered user profile with preferences and simulation statistics",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin", "contributor"] },
+        "totalSimulations": { "type": "number" },
+        "totalDistanceKm": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "lastActiveAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "SimulationRun": {
+      "title": "Simulation Record",
+      "description": "Historical records of completed and active GPS navigation simulations across Zinder",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userDisplayName": { "type": "string" },
+        "circuitId": { "type": "string" },
+        "circuitTitle": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "speedKmh": { "type": "number" },
+        "distanceKm": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "waypointsCount": { "type": "number" },
+        "status": { "type": "string", "enum": ["in_progress", "completed", "paused"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "circuitId", "circuitTitle", "createdAt"]
+    },
+    "CustomLocation": {
+      "title": "Community Location",
+      "description": "User submitted places and points of interest in Zinder",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "description": { "type": "string" },
+        "address": { "type": "string" },
+        "neighborhood": { "type": "string" },
+        "phone": { "type": "string" },
+        "isOnDuty": { "type": "boolean" },
+        "openingHours": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "type", "latitude", "longitude", "createdBy"]
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}
